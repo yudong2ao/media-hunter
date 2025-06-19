@@ -717,3 +717,256 @@
         }
     }
 })();
+(function () {
+    // 用于收集和去重媒体资源
+    const mediaResourceMap = new Map(); // key: url+ext, value: {name, url, ext, resolution, duration}
+    let mediaBtn, mediaPanel, panelContent;
+
+    // 1. 监听上报媒体资源
+    const originalPostMessage = window.postMessage;
+    window.postMessage = function (data, ...args) {
+        if (data && data.action === "catCatchAddMedia") {
+            handleFoundMedia(data);
+        }
+        return originalPostMessage.apply(this, arguments);
+    };
+
+    // 2. 处理媒体资源并去重合并
+    function handleFoundMedia(data) {
+        // 取资源URL和拓展名
+        let { url, ext } = data;
+        if (!url || !ext) return;
+        // 尝试从URL或data中获取分辨率、时长
+        let name = extractNameFromUrl(url);
+        let resolution = extractResolution(name, data) || '--';
+        let duration = extractDuration(data) || '--';
+        const key = url + '|' + ext;
+
+        // 若已存在同资源，按分辨率高低保留
+        if (mediaResourceMap.has(key)) {
+            let old = mediaResourceMap.get(key);
+            if (compareResolution(resolution, old.resolution) > 0) {
+                mediaResourceMap.set(key, { name, url, ext, resolution, duration });
+            }
+            // 否则保留旧的
+        } else {
+            mediaResourceMap.set(key, { name, url, ext, resolution, duration });
+        }
+        updateMediaButton();
+        if (mediaPanel && mediaPanel.style.display !== "none") {
+            renderMediaPanel();
+        }
+    }
+
+    // 3. 抽取文件名
+    function extractNameFromUrl(url) {
+        try {
+            let u = url;
+            if (u.startsWith('blob:')) return '本地清单';
+            if (u.startsWith('data:')) return '内嵌媒体';
+            u = u.split('?')[0].split('#')[0];
+            return decodeURIComponent(u.substring(u.lastIndexOf('/') + 1)) || url;
+        } catch {
+            return url;
+        }
+    }
+    // 4. 抽取分辨率(从文件名或data)
+    function extractResolution(name, data) {
+        // 文件名如 xxx_1920x1080.mp4
+        let match = name.match(/(\d{3,4})[xX](\d{3,4})/);
+        if (match) return match[0];
+        // 部分data里有 width/height 字段
+        if (data && data.width && data.height) return `${data.width}x${data.height}`;
+        if (data && typeof data.resolution === 'string') return data.resolution;
+        return '--';
+    }
+    // 5. 抽取时长
+    function extractDuration(data) {
+        if (!data) return '--';
+        if (typeof data.duration === "number") return formatDuration(data.duration);
+        if (typeof data.duration === "string" && /^\d+$/.test(data.duration)) return formatDuration(Number(data.duration));
+        return '--';
+    }
+    function formatDuration(sec) {
+        if (!sec || isNaN(sec)) return '--';
+        sec = Math.round(sec);
+        const m = Math.floor(sec / 60);
+        const s = sec % 60;
+        return `${m}:${s.toString().padStart(2, '0')}`;
+    }
+    // 6. 分辨率对比（1920x1080 > 1280x720，其他认为相等）
+    function compareResolution(r1, r2) {
+        if (!/\d+x\d+/.test(r1)) return -1;
+        if (!/\d+x\d+/.test(r2)) return 1;
+        const [w1, h1] = r1.split('x').map(Number);
+        const [w2, h2] = r2.split('x').map(Number);
+        return w1 * h1 - w2 * h2;
+    }
+
+    // 7. UI：右下角按钮
+    function updateMediaButton() {
+        if (!mediaBtn) {
+            // 创建按钮
+            mediaBtn = document.createElement('div');
+            mediaBtn.innerHTML = '媒体下载';
+            Object.assign(mediaBtn.style, {
+                position: 'fixed',
+                right: '32px',
+                bottom: '32px',
+                zIndex: 99999,
+                background: '#1976d2',
+                color: '#fff',
+                borderRadius: '8px',
+                padding: '12px 24px',
+                boxShadow: '0 2px 8px rgba(30,34,45,0.08)',
+                fontSize: '16px',
+                cursor: 'pointer',
+                userSelect: 'none',
+                opacity: '0.95',
+                transition: 'background .2s'
+            });
+            mediaBtn.onmouseenter = () => { mediaBtn.style.background = '#1565c0'; };
+            mediaBtn.onmouseleave = () => { mediaBtn.style.background = '#1976d2'; };
+            mediaBtn.onclick = () => showMediaPanel();
+            document.body.appendChild(mediaBtn);
+        }
+        // 有资源才展示
+        mediaBtn.style.display = mediaResourceMap.size ? 'block' : 'none';
+    }
+
+    // 8. UI：弹窗
+    function showMediaPanel() {
+        if (!mediaPanel) {
+            // 背景遮罩
+            mediaPanel = document.createElement('div');
+            Object.assign(mediaPanel.style, {
+                position: 'fixed',
+                right: '0',
+                bottom: '0',
+                top: '0',
+                left: '0',
+                background: 'rgba(33,40,53,0.16)',
+                zIndex: 999999,
+                display: 'flex',
+                justifyContent: 'flex-end',
+                alignItems: 'flex-end'
+            });
+            // 主面板
+            const panel = document.createElement('div');
+            Object.assign(panel.style, {
+                width: '480px',
+                maxWidth: '98vw',
+                background: '#fff',
+                borderRadius: '12px 12px 0 0',
+                boxShadow: '0 4px 24px 0 rgba(30,34,45,.18)',
+                marginBottom: '0',
+                padding: '0',
+                display: 'flex',
+                flexDirection: 'column',
+                maxHeight: '80vh',
+                overflow: 'hidden'
+            });
+            // 头部
+            const header = document.createElement('div');
+            header.innerHTML = `<span style="font-size:18px;font-weight:bold;color:#1976d2">媒体资源列表</span>`;
+            Object.assign(header.style, {
+                padding: '20px 20px 10px 20px',
+                borderBottom: '1px solid #e3e8ee',
+                background: '#f5f7fa',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+            });
+            // 关闭按钮
+            const closeBtn = document.createElement('span');
+            closeBtn.innerHTML = '&times;';
+            Object.assign(closeBtn.style, {
+                fontSize: '28px',
+                color: '#90a4ae',
+                cursor: 'pointer',
+                marginLeft: '12px',
+                lineHeight: '1'
+            });
+            closeBtn.onclick = () => { mediaPanel.style.display = 'none'; };
+            header.appendChild(closeBtn);
+            panel.appendChild(header);
+
+            // 内容区
+            panelContent = document.createElement('div');
+            Object.assign(panelContent.style, {
+                padding: '0',
+                overflowY: 'auto',
+                flex: '1 1 0',
+                background: '#fff'
+            });
+            panel.appendChild(panelContent);
+
+            // 底部
+            const footer = document.createElement('div');
+            Object.assign(footer.style, {
+                padding: '10px 20px',
+                borderTop: '1px solid #e3e8ee',
+                background: '#fafbfc',
+                textAlign: 'right',
+                fontSize: '12px',
+                color: '#90a4ae'
+            });
+            footer.innerText = '如需下载功能，后续版本支持';
+            panel.appendChild(footer);
+
+            mediaPanel.appendChild(panel);
+            document.body.appendChild(mediaPanel);
+
+            // 点击遮罩关闭
+            mediaPanel.addEventListener('click', e => {
+                if (e.target === mediaPanel) mediaPanel.style.display = 'none';
+            });
+        }
+        mediaPanel.style.display = 'flex';
+        renderMediaPanel();
+    }
+
+    // 9. 资源内容渲染
+    function renderMediaPanel() {
+        if (!panelContent) return;
+        // 头部
+        panelContent.innerHTML = `
+            <table style="width:100%;border-collapse:collapse;font-size:15px;">
+                <thead>
+                <tr style="background:#f0f3f8;">
+                    <th style="padding:8px 10px;color:#1976d2;">名称</th>
+                    <th style="padding:8px 6px;color:#1976d2;">分辨率</th>
+                    <th style="padding:8px 6px;color:#1976d2;">时长</th>
+                    <th style="padding:8px 6px;color:#1976d2;">格式</th>
+                    <th style="padding:8px 6px;color:#1976d2;">操作</th>
+                </tr>
+                </thead>
+                <tbody>
+                ${Array.from(mediaResourceMap.values()).map((media, idx) => `
+                    <tr style="border-bottom:1px solid #f0f3f8;">
+                        <td style="padding:7px 10px;word-break:break-all;color:#263238">${media.name}</td>
+                        <td style="padding:7px 6px;text-align:center;color:#1976d2">${media.resolution||'--'}</td>
+                        <td style="padding:7px 6px;text-align:center;color:#1976d2">${media.duration||'--'}</td>
+                        <td style="padding:7px 6px;text-align:center;color:#2196f3">${media.ext}</td>
+                        <td style="padding:7px 6px;text-align:center;">
+                            <button onclick="navigator.clipboard.writeText('${media.url}');this.innerText='已复制';setTimeout(()=>this.innerText='复制',1000);" style="background:#1976d2;color:#fff;border:none;border-radius:4px;padding:4px 14px;cursor:pointer;outline:none;font-size:14px;">复制</button>
+                        </td>
+                    </tr>
+                `).join('')}
+                </tbody>
+            </table>
+        `;
+    }
+
+    // 10. 兼容 Greasemonkey/Tampermonkey 脚本环境
+    if (typeof GM_registerMenuCommand === "function") {
+        GM_registerMenuCommand('显示媒体资源列表', showMediaPanel);
+    }
+
+    // 11. 兼容页面刷新
+    window.addEventListener('beforeunload', () => {
+        if (mediaBtn) mediaBtn.remove();
+        if (mediaPanel) mediaPanel.remove();
+    });
+
+})();
