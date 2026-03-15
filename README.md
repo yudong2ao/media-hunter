@@ -13,7 +13,7 @@
 
 | 1. 自动发现资源 | 2. 智能解析面板 | 3. 系统原生进度 | 4. 下载静默完成 |
 | :---: | :---: | :---: | :---: |
-| <img src="image.png" width="225"> | <img src="image-1.png" width="225"> | <img src="image-2.png" width="225"> | <img src="image-3.png" width="225"> |
+| <img src="示例图片/image.png" width="225"> | <img src="示例图片/image-1.png" width="225"> | <img src="示例图片/image-2.png" width="225"> | <img src="示例图片/image-3.png" width="225"> |
 
 > 从左至右：网页右下角自动唤起按钮 -> 展开详尽的媒体链接列表 -> Windows 通知中心实时进度条 -> 任务圆满结束提示。
 
